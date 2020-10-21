@@ -18,14 +18,13 @@ const (
 	Tiny   = 16
 	Little = 32
 
-	Tiny_   = "tiny"
-	Little_ = "little"
-	Enough_ = "enough"
+	Tiny_ = iota + 1
+	Little_
+	Enough_
 )
 
-type emptymem struct {
-	ptr unsafe.Pointer
-}
+type emptymem uintptr
+type Task uintptr
 
 type List struct {
 	ptr      unsafe.Pointer
@@ -33,47 +32,73 @@ type List struct {
 	priority int
 }
 
-type Task struct {
+type limbo struct {
+	_p *p
+}
+
+type p struct {
+	__p unsafe.Pointer
 }
 
 // memory struct
 type masa struct {
-	ptr     unsafe.Pointer
-	offset  uint
-	size    uintptr
-	status  string
-	memList map[int]*emptymem
-	cached  *List
-	task    *Task
-	v       interface{}
+	ptr       *limbo
+	offset    uint
+	size      int
+	status    string
+	allocated [3]bool
+
+	mList  []*Task
+	cached *List
+	task   *Task
+	v      interface{}
 }
 
 type Masa interface {
 	init() *masa
-	getAllocationSize() uintptr
-	level() string
-	allocate(size uintptr, task ...*Task)
+	getAllocationSize() int
+	setAllocationSize(value int) int
+	level() int
+	allocate(size int, task ...*Task)
 	sliceChecking(s interface{}) (bool, interface{})
-	checkAllocationStatus(size uintptr, task ...*Task) string
-	isOutOfMemory(size uintptr) bool
-	check(size uintptr, task ...*Task)
-	doAllocLittle(size uintptr, task ...*Task) (status string)
-	doAllocTiny(size uintptr, task ...*Task) (status string)
-	doAllocEnough(size uintptr, task ...*Task) (status string)
-	addToList(task *Task)
+	checkAllocationStatus(size int, task ...*Task) string
+	isOutOfMemory(size int) bool
+	check(size int, task ...*Task)
+	doAllocLittle(size int, task ...*Task) (status string)
+	doAllocTiny(size int, task ...*Task) (status string)
+	doAllocEnough(size int, task ...*Task) (status string)
+	addToList(task *Task) bool
 }
 
-// TODO: remove the manual assignment
 func (m *masa) init() *masa {
-	m = &masa{nil, 0, 0, MemoryInitializing, nil, &List{nil, Tiny, 0}, nil, nil}
+	m.ptr = nil
+	m.offset = 0
+	m.size = 0
+	m.status = MemoryInitializing
+	for i := 0; i < 3; i++ {
+		m.allocated[i] = false
+	}
+	m.mList = nil
+	m.cached = &List{
+		ptr:      nil,
+		size:     Tiny,
+		priority: 0,
+	}
+	m.task = nil
+	m.v = nil
 	return m
 }
 
-func (m *masa) getAllocationSize() uintptr {
+func (m *masa) getAllocationSize() int {
 	return m.size
 }
 
-func (m *masa) level(size uintptr) string {
+func (m *masa) setAllocationSize(value int) int {
+	m.size = value
+	return m.size
+}
+
+func (m *masa) level(size int) int {
 	if size <= Little {
 		if size >= Tiny {
 			return Little_
@@ -83,7 +108,7 @@ func (m *masa) level(size uintptr) string {
 	return Enough_
 }
 
-func (m *masa) allocate(size uintptr, task ...*Task) {
+func (m *masa) allocate(size int, task ...*Task) {
 	_, m.v = m.sliceChecking(task)
 	m.task = (m.v).(*Task)
 
@@ -97,26 +122,26 @@ func (m *masa) allocate(size uintptr, task ...*Task) {
 	}
 }
 
-func (m *masa) isOutOfMemory(size uintptr) bool {
-	if int(size) < Tiny {
+func (m *masa) isOutOfMemory(size int) bool {
+	if size < Tiny {
 		cnt := 0
-		for i := 0; i < int(size); i++ {
-			if m.memList[i] != nil {
+		for i := 0; i < size; i++ {
+			if m.mList[i] != nil {
 				cnt++
 			}
 		}
-		if cnt < int(size) {
+		if cnt < size {
 			return true
 		}
 		return false
-	} else if int(size) >= Tiny && int(size) <= Little {
+	} else if size >= Tiny && size <= Little {
 		cnt := 0
 		for i := Tiny; i <= Little; i++ {
-			if m.memList[i] != nil {
+			if m.mList[i] != nil {
 				cnt++
 			}
 		}
-		if cnt < int(size) {
+		if cnt < size {
 			return true
 		}
 		return false
@@ -124,11 +149,11 @@ func (m *masa) isOutOfMemory(size uintptr) bool {
 		var i int
 		cnt := 0
 		for ; i > Little; i++ {
-			if m.memList[i] != nil {
+			if m.mList[i] != nil {
 				cnt++
 			}
 		}
-		if cnt < int(size) {
+		if cnt < size {
 			return true
 		}
 		return false
@@ -143,7 +168,7 @@ func (m *masa) sliceChecking(s ...interface{}) (ok bool, v interface{}) {
 	return false, nil
 }
 
-func (m *masa) checkAllocationStatus(size uintptr, task ...*Task) string {
+func (m *masa) checkAllocationStatus(size int, task ...*Task) string {
 	if m.isOutOfMemory(size) {
 		return MemoryAllocateFailed
 	}
@@ -159,41 +184,57 @@ func (m *masa) checkAllocationStatus(size uintptr, task ...*Task) string {
 		}
 		_, m.v = m.sliceChecking(task)
 		m.task = (m.v).(*Task)
-		m.addToList(m.task)
-		log.Warnf("task cannot add to wait list.")
-		return FullOfWaitList
+		if !m.addToList(m.task) {
+			log.Warnf("task cannot add to wait list.")
+			return FullOfWaitList
+		}
 	}
 	return MemoryWaitToAllocate
 }
 
-func (m *masa) check(size uintptr, task ...*Task) {
+func (m *masa) check(size int, task ...*Task) (status string) {
 	_, m.v = m.sliceChecking(task)
 	m.task = (m.v).(*Task)
-	m.checkAllocationStatus(size, m.task)
+	return m.checkAllocationStatus(size, m.task)
 }
 
-// TODO: allocate memory for Tiny level
-func (m *masa) doAllocLittle(size uintptr, task ...*Task) (status string) {
-	m.check(size, task...)
-
+// allocate memory for Tiny level
+func (m *masa) doAllocTiny(size int, task ...*Task) (status string) {
+	status = m.check(size, task...)
+	if m.ptr != nil && 0 < size && size < Tiny {
+		for i := 0; i < size; i++ {
+			m.allocated[i] = true
+		}
+	}
 	return
 }
 
-// TODO: allocate memory for Little level
-func (m *masa) doAllocTiny(size uintptr, task ...*Task) (status string) {
-	m.check(size, task...)
-
+// allocate memory for Little level
+func (m *masa) doAllocLittle(size int, task ...*Task) (status string) {
+	status = m.check(size, task...)
+	if m.ptr._p != nil && Tiny <= size && size <= Little {
+		for i := Tiny; i < size; i++ {
+			m.allocated[i] = true
+		}
+	}
 	return
 }
 
-// TODO: allocate memory for Enough level
-func (m *masa) doAllocEnough(size uintptr, task ...*Task) (status string) {
-	m.check(size, task...)
-
+// allocate memory for Enough level
+func (m *masa) doAllocEnough(size int, task ...*Task) (status string) {
+	status = m.check(size, task...)
+	if m.ptr._p.__p != nil && size > Little {
+		for i := Little; ; i++ {
+			m.allocated[i] = true
+		}
+	}
 	return
 }
 
-// TODO
-func (m *masa) addToList(task *Task) {
-
+func (m *masa) addToList(task *Task) bool {
+	if task != nil {
+		m.mList = append(m.mList, task)
+		return true
+	}
+	return false
 }
