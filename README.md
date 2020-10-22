@@ -14,7 +14,7 @@ masa is a simulation algorithm to allocate the memory. It supports level control
 
 ## Status transfer
 
-- MemoryInitialing
+- MemoryInitializing
 - MemoryAllocated
 - MemoryAllocating
 - MemoryAllocateFailed

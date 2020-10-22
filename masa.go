@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// memory allocation status and size limitations
 const (
 	MemoryInitializing   = "init"
 	MemoryAllocated      = "allocated"
@@ -18,14 +19,17 @@ const (
 	Tiny   = 16
 	Little = 32
 
-	Tiny_ = iota + 1
-	Little_
-	Enough_
+	T = iota + 1
+	L
+	E
 )
 
 type emptymem uintptr
+
+// Task defines the task instance
 type Task uintptr
 
+// List defines a list
 type List struct {
 	ptr      unsafe.Pointer
 	size     int
@@ -37,10 +41,10 @@ type limbo struct {
 }
 
 type p struct {
-	__p unsafe.Pointer
+	_P unsafe.Pointer
 }
 
-// memory struct
+// masa defines a memory instance
 type masa struct {
 	ptr       *limbo
 	offset    uint
@@ -54,6 +58,7 @@ type masa struct {
 	v      interface{}
 }
 
+// Masa defines masa m interface
 type Masa interface {
 	init() *masa
 	getAllocationSize() int
@@ -101,11 +106,11 @@ func (m *masa) setAllocationSize(value int) int {
 func (m *masa) level(size int) int {
 	if size <= Little {
 		if size >= Tiny {
-			return Little_
+			return L
 		}
-		return Tiny_
+		return T
 	}
-	return Enough_
+	return E
 }
 
 func (m *masa) allocate(size int, task ...*Task) {
@@ -113,11 +118,11 @@ func (m *masa) allocate(size int, task ...*Task) {
 	m.task = (m.v).(*Task)
 
 	switch m.level(size) {
-	case Little_:
+	case L:
 		m.doAllocLittle(size, m.task)
-	case Tiny_:
+	case T:
 		m.doAllocTiny(size, m.task)
-	case Enough_:
+	case E:
 		m.doAllocEnough(size, m.task)
 	}
 }
@@ -223,7 +228,7 @@ func (m *masa) doAllocLittle(size int, task ...*Task) (status string) {
 // allocate memory for Enough level
 func (m *masa) doAllocEnough(size int, task ...*Task) (status string) {
 	status = m.check(size, task...)
-	if m.ptr._p.__p != nil && size > Little {
+	if m.ptr._p._P != nil && size > Little {
 		for i := Little; ; i++ {
 			m.allocated[i] = true
 		}
