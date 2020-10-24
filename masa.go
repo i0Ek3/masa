@@ -46,13 +46,13 @@ type p struct {
 
 // masa defines a memory instance
 type masa struct {
-	ptr       *limbo
-	offset    uint
-	size      int
-	status    string
-	allocated [3]bool
+	ptr    *limbo
+	offset uint
+	size   int
+	status string
+	flag   bool
 
-	mList  []*Task
+	mList  map[int]*Task
 	cached *List
 	task   *Task
 	v      interface{}
@@ -60,29 +60,29 @@ type masa struct {
 
 // Masa defines masa m interface
 type Masa interface {
-	init() *masa
 	getAllocationSize() int
 	setAllocationSize(value int) int
 	level() int
-	allocate(size int, task ...*Task)
+	allocate(size int, task *Task)
 	sliceChecking(s interface{}) (bool, interface{})
-	checkAllocationStatus(size int, task ...*Task) string
+	checkAllocationStatus(size int, task *Task) string
 	isOutOfMemory(size int) bool
-	check(size int, task ...*Task)
-	doAllocLittle(size int, task ...*Task) (status string)
-	doAllocTiny(size int, task ...*Task) (status string)
-	doAllocEnough(size int, task ...*Task) (status string)
+	check(size int, task *Task)
+	doAllocLittle(size int, task *Task) (status string)
+	doAllocTiny(size int, task *Task) (status string)
+	doAllocEnough(size int, task *Task) (status string)
 	addToList(task *Task) bool
 }
 
-func (m *masa) init() *masa {
+func init() {
+	var m masa
 	m.ptr = nil
+	//m.ptr._p = nil
+	//m.ptr._p._P = nil
 	m.offset = 0
 	m.size = 0
 	m.status = MemoryInitializing
-	for i := 0; i < 3; i++ {
-		m.allocated[i] = false
-	}
+	m.flag = false
 	m.mList = nil
 	m.cached = &List{
 		ptr:      nil,
@@ -91,7 +91,6 @@ func (m *masa) init() *masa {
 	}
 	m.task = nil
 	m.v = nil
-	return m
 }
 
 func (m *masa) getAllocationSize() int {
@@ -113,7 +112,7 @@ func (m *masa) level(size int) int {
 	return E
 }
 
-func (m *masa) allocate(size int, task ...*Task) {
+func (m *masa) allocate(size int, task *Task) {
 	_, m.v = m.sliceChecking(task)
 	m.task = (m.v).(*Task)
 
@@ -173,7 +172,7 @@ func (m *masa) sliceChecking(s ...interface{}) (ok bool, v interface{}) {
 	return false, nil
 }
 
-func (m *masa) checkAllocationStatus(size int, task ...*Task) string {
+func (m *masa) checkAllocationStatus(size int, task *Task) string {
 	if m.isOutOfMemory(size) {
 		return MemoryAllocateFailed
 	}
@@ -197,40 +196,40 @@ func (m *masa) checkAllocationStatus(size int, task ...*Task) string {
 	return MemoryWaitToAllocate
 }
 
-func (m *masa) check(size int, task ...*Task) (status string) {
+func (m *masa) check(size int, task *Task) (status string) {
 	_, m.v = m.sliceChecking(task)
 	m.task = (m.v).(*Task)
 	return m.checkAllocationStatus(size, m.task)
 }
 
 // allocate memory for Tiny level
-func (m *masa) doAllocTiny(size int, task ...*Task) (status string) {
-	status = m.check(size, task...)
+func (m *masa) doAllocTiny(size int, task *Task) (status string) {
+	status = m.check(size, task)
 	if m.ptr != nil && 0 < size && size < Tiny {
 		for i := 0; i < size; i++ {
-			m.allocated[i] = true
+			m.flag = true
 		}
 	}
 	return
 }
 
 // allocate memory for Little level
-func (m *masa) doAllocLittle(size int, task ...*Task) (status string) {
-	status = m.check(size, task...)
-	if m.ptr._p != nil && Tiny <= size && size <= Little {
+func (m *masa) doAllocLittle(size int, task *Task) (status string) {
+	status = m.check(size, task)
+	if m.ptr /*._p*/ != nil && Tiny <= size && size <= Little {
 		for i := Tiny; i < size; i++ {
-			m.allocated[i] = true
+			m.flag = true
 		}
 	}
 	return
 }
 
 // allocate memory for Enough level
-func (m *masa) doAllocEnough(size int, task ...*Task) (status string) {
-	status = m.check(size, task...)
-	if m.ptr._p._P != nil && size > Little {
+func (m *masa) doAllocEnough(size int, task *Task) (status string) {
+	status = m.check(size, task)
+	if m.ptr /*._p._P*/ != nil && size > Little {
 		for i := Little; ; i++ {
-			m.allocated[i] = true
+			m.flag = true
 		}
 	}
 	return
@@ -238,7 +237,11 @@ func (m *masa) doAllocEnough(size int, task ...*Task) (status string) {
 
 func (m *masa) addToList(task *Task) bool {
 	if task != nil {
-		m.mList = append(m.mList, task)
+		for i := 0; i < len(m.mList); i++ {
+			if m.mList[i] != nil {
+				m.mList[i] = task
+			}
+		}
 		return true
 	}
 	return false

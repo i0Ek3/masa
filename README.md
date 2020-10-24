@@ -7,9 +7,9 @@ masa is a simulation algorithm to allocate the memory. It supports level control
 
 ## Level control allocation
 
-- Tiny_
-- Little_
-- Enough_
+- Tiny(`(0, 16)`)
+- Little(`[16, 32]`)
+- Enough(`(32, )`)
 
 
 ## Status transfer
